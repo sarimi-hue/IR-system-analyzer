@@ -1042,7 +1042,6 @@ def main():
     # 5. Define features and thresholds using mapped names
     electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
     
-    # CRITICAL: Fix the thresholds keys to match mapped names
     ir_thresholds = {
         mapping['IR2']: float(args.ir2_threshold),
         mapping['IR3']: float(args.ir3_threshold),
@@ -1057,28 +1056,35 @@ def main():
     filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(
         raw_df, electrical_features, ir_thresholds
     )
-
     # 8. Run MTS Analysis
     mts_analyzer = MTS(filtered_df, features=electrical_features, status_col='Actual_Status', 
                        normal_status='OK', ir_thresholds=ir_thresholds)
     result_df = mts_analyzer.detect_abnormal(md_quantile=args.md_quantile)
+    error_summary = mts_analyzer.calculate_type1_type2_errors(result_df)
     
-    # 9. FINAL EXPORT (Cleaned version)
+    # 9. FINAL EXPORT & METRICS
+    # Ensure row number exists in the result set (Safety check)
     if 'original_row_number' not in result_df.columns:
         result_df['original_row_number'] = result_df.index + 1
 
     md_output_file = os.path.join(output_folder, f'MD_{base_name}.csv')
-
+    
+    # Perform the export ONCE
     try:
-        # Prepare export dataframe
         md_export_df = result_df[['original_row_number', 'Mahalanobis_Distance']].copy()
         md_export_df.rename(columns={'original_row_number': 'data no', 'Mahalanobis_Distance': 'MD'}, inplace=True)
         md_export_df.to_csv(md_output_file, index=False)
         print(f"✅ Success: Full Mahalanobis Distances exported to: {md_output_file}")
-    except KeyError as e:
-        print(f"⚠️ Warning: Could not export MD values. Column missing: {e}")
     except Exception as e:
-        print(f"⚠️ Unexpected error during export: {e}")
+        print(f"⚠️ Export failed: {e}")
+
+    # Build the metrics table for Streamlit/Report
+    metrics_data = [
+        {'Metric': 'N_actual normal', 'Value': error_summary['N_Actual_Normal']},
+        {'Metric': 'N_actual abnormal', 'Value': error_summary['N_Actual_Abnormal']},
+        {'Metric': 'Type I Error (FP)', 'Value': f"{error_summary['Type_I_Error_Rate']:.2%}"},
+        {'Metric': 'Type II Error (FN)', 'Value': f"{error_summary.get('Type_II_Error_Rate', 0):.2%}"}
+    ]
 
     # HOTELLING'S T2 for comparing with benchmark~
     t2_results = None 
