@@ -1018,25 +1018,14 @@ def main():
 
     electrical_features = ['IR2', 'IR3', 'IR4']
     ir_thresholds = {'IR2': args.ir2_threshold, 'IR3': args.ir3_threshold, 'IR4': args.ir4_threshold}
-# 1. Load data and clean headers
+# 1. Load the data
     raw_df = pd.read_csv(input_file)
-    raw_df.columns = [str(c).strip() for c in raw_df.columns] # Remove hidden spaces
-
-    # 2. SMART COLUMN MAPPING (This is the critical part)
-    # This finds the actual names used in your CSV
-    mapping = {}
-    for col in raw_df.columns:
-        col_up = col.upper()
-        # Look for the numeric value column, ignoring 'status' or 'flag' columns
-        if 'IR2' in col_up and 'STATUS' not in col_up: mapping['IR2'] = col
-        if 'IR3' in col_up and 'STATUS' not in col_up: mapping['IR3'] = col
-        if 'IR4' in col_up and 'STATUS' not in col_up: mapping['IR4'] = col
-
-    # 3. Check if we found the columns
-    if not all(k in mapping for k in ['IR2', 'IR3', 'IR4']):
-        print(f"❌ Error: Could not find columns for IR2, IR3, or IR4.")
-        print(f"Columns found in file: {list(raw_df.columns)}")
-        sys.exit(1)
+    
+    # 2. IMMEDIATELY add the index column before any filtering happens
+    raw_df['original_row_number'] = raw_df.index + 1
+    
+    # 3. Clean headers (Remove hidden spaces)
+    raw_df.columns = [str(c).strip() for c in raw_df.columns]
 
     # 4. Use the ACTUAL column names found
     electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
@@ -1069,6 +1058,13 @@ def main():
     md_export_df.rename(columns={'original_row_number': 'data no', 'Mahalanobis_Distance': 'MD'}, inplace=True)
     md_export_df.to_csv(md_output_file, index=False)
     print(f"Full Mahalanobis Distances exported to: {md_output_file}")
+
+    # If the column was lost during processing, recreate it from the index
+    if 'original_row_number' not in result_df.columns:
+        result_df['original_row_number'] = result_df.index + 1
+
+    # Now this line (your line 1068) will work:
+    md_export_df = result_df[['original_row_number', 'Mahalanobis_Distance']].copy()
 
     # HOTELLING'S T2 for comparing with benchmark~
     t2_results = None 
