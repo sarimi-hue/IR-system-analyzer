@@ -1018,24 +1018,29 @@ def main():
 
     electrical_features = ['IR2', 'IR3', 'IR4']
     ir_thresholds = {'IR2': args.ir2_threshold, 'IR3': args.ir3_threshold, 'IR4': args.ir4_threshold}
-# 1. Load the data
+# 1. Load data
     raw_df = pd.read_csv(input_file)
     
-    # 2. IMMEDIATELY add the index column before any filtering happens
-    raw_df['original_row_number'] = raw_df.index + 1
-    
-    # 3. Clean headers (Remove hidden spaces)
+    # 2. IMMEDIATELY clean headers (removes hidden spaces)
     raw_df.columns = [str(c).strip() for c in raw_df.columns]
 
-    # 4. Use the ACTUAL column names found
-    electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
+    # 3. DEFINE THE MAPPING (This MUST come before line 1031)
+    mapping = {}
+    for col in raw_df.columns:
+        col_up = col.upper()
+        # Find numeric columns, avoiding 'Status' columns
+        if 'IR2' in col_up and 'STATUS' not in col_up: mapping['IR2'] = col
+        if 'IR3' in col_up and 'STATUS' not in col_up: mapping['IR3'] = col
+        if 'IR4' in col_up and 'STATUS' not in col_up: mapping['IR4'] = col
 
-    # 5. Define thresholds using the mapped names (Fixes the KeyError)
-    ir_thresholds = {
-        mapping['IR2']: float(args.ir2_threshold),
-        mapping['IR3']: float(args.ir3_threshold),
-        mapping['IR4']: float(args.ir4_threshold)
-    }
+    # 4. Check if we found the columns
+    if not all(k in mapping for k in ['IR2', 'IR3', 'IR4']):
+        print(f"❌ Error: Could not find numeric IR2/3/4 columns.")
+        print(f"Columns found: {list(raw_df.columns)}")
+        sys.exit(1)
+
+    # 5. NOW line 1031 will work because 'mapping' exists
+    electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
 
     # 6. Clean numeric data using the mapped names
     for col in electrical_features:
