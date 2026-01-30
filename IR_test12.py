@@ -1019,14 +1019,27 @@ def main():
     electrical_features = ['IR2', 'IR3', 'IR4']
     ir_thresholds = {'IR2': args.ir2_threshold, 'IR3': args.ir3_threshold, 'IR4': args.ir4_threshold}
 
-    #DATA PROCESSING
+# 1. Load data and immediately clean column names
     raw_df = pd.read_csv(input_file)
+    raw_df.columns = raw_df.columns.str.strip() # Remove spaces like " IR2 "
+
+    # 2. Verify all required features exist before proceeding
+    missing_cols = [c for c in electrical_features if c not in raw_df.columns]
+    if missing_cols:
+        print(f"❌ Error: The columns {missing_cols} are missing from the input file.")
+        print(f"Available columns: {list(raw_df.columns)}")
+        sys.exit(1) # This forces the Streamlit app to show the error
+
+    # 3. Clean numeric data
     for col in electrical_features:
-        if col in raw_df.columns:
-            # Convert text errors to NaN, then fill NaN with 0
-            raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
-    raw_df.columns = raw_df.columns.str.strip()
+        # Convert text/errors to NaN, then fill with 0 so the math doesn't crash
+        raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
+    
+    # 4. Add index tracking
     raw_df['original_row_number'] = raw_df.index + 1
+    
+    # 5. Drop completely empty rows (safety for Mahalanobis math)
+    raw_df = raw_df.dropna(subset=electrical_features).reset_index(drop=True)
 
     # Stage 1: Filter
     filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(raw_df, electrical_features, ir_thresholds)
