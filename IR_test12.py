@@ -1022,8 +1022,17 @@ def main():
     raw_df = pd.read_csv(input_file)
     
     # 2. IMMEDIATELY add the index and clean headers
+# 2. IMPROVED CLEANING: Removes BOM, hidden characters, and math symbols
     raw_df['original_row_number'] = raw_df.index + 1
-    raw_df.columns = [str(c).strip() for c in raw_df.columns]
+    
+    # This removes the \ufeff (BOM) and replaces the tricky Omega symbol with 'Ohms'
+    new_cols = []
+    for col in raw_df.columns:
+        clean_name = str(col).replace('\ufeff', '').strip()
+        clean_name = clean_name.replace('$\\Omega$', 'Ohms').replace('$\Omega$', 'Ohms').replace('Ω', 'Ohms')
+        new_cols.append(clean_name)
+    
+    raw_df.columns = new_cols
 
     # 3. DEFINE THE MAPPING
     mapping = {}
