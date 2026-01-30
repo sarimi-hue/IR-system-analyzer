@@ -602,39 +602,80 @@ def plot_distributions(feature_set, data_df_all, data_df_ok, median_ok_stats, st
                 if not right_outliers.empty: 
                     ax_row1.annotate(f'{len(right_outliers)} pts>', xy=(x_max_limit, y_max_for_anno * 0.9), xytext=(x_max_limit - (x_max_limit-x_min_limit)*0.05, y_max_for_anno * 0.8),
                                     arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5), fontsize=8, color='red', ha='right')
-
-    # 3. CALL LINEAR PLOTS
-    plot_distributions(self.features, result_df, self.normal_data, self.median_3sigma, self.std_3sigma, self.raw_median, self.raw_std, self.ir_thresholds, R_start=0, scale_label='Linear Scale')
+# 3. CALL LINEAR PLOTS (Rows 1 & 2)
+    plot_distributions(
+        self.features, 
+        result_df, 
+        self.normal_data, 
+        self.median_3sigma, 
+        self.std_3sigma, 
+        self.raw_median, 
+        self.raw_std, 
+        self.ir_thresholds, 
+        R_start=0, 
+        scale_label='Linear Scale'
+    )
     
-    # 4. CALL LOG PLOTS
-    plot_distributions(log_features, log_df, log_normal_data, log_median_ok, log_std_ok, log_raw_median, log_raw_std, log_ir_thresholds, R_start=2, scale_label='Log Scale')
+    # 4. CALL LOG PLOTS (Rows 3 & 4)
+    plot_distributions(
+        log_features, 
+        log_df, 
+        log_normal_data, 
+        log_median_ok, 
+        log_std_ok, 
+        log_raw_median, 
+        log_raw_std, 
+        log_ir_thresholds, 
+        R_start=2, 
+        scale_label='Log Scale'
+    )
 
     # 5. MD PLOTS (Row 5)
+    # Calculate limits for zooming logic
+    y_max_overall = result_df['Mahalanobis_Distance'].max() * 1.05
+    secondary_md_threshold = np.percentile(result_df['Mahalanobis_Distance'], secondary_threshold_percentile)
+    y_max_normal = max(self.md_threshold, secondary_md_threshold) * 2
+    
+    min_t = min(self.md_threshold, secondary_md_threshold)
+    max_t = max(self.md_threshold, secondary_md_threshold)
+
     draw_md_scatter(axes[4, 0], 'MD Analysis: 1. Overall View', set_ylim=(0, y_max_overall))
     draw_md_scatter(axes[4, 1], f'MD Analysis: 2. Zoom Near Normal (0 to {y_max_normal:.2f})', set_ylim=(0, y_max_normal))
-    
-    min_t, max_t = min(self.md_threshold, secondary_md_threshold), max(self.md_threshold, secondary_md_threshold)
     draw_md_scatter(axes[4, 2], 'MD Analysis: 3. Zoom Thresholds', set_ylim=(max(0, min_t * 0.9), max_t * 1.1))
 
     # 6. ERROR PLOTS (Row 6)
     def draw_error_scatter(ax, title, set_ylim=None):
-        ax.scatter(tn_points.index, tn_points['Mahalanobis_Distance'], color='blue', label='TN', alpha=0.6, s=15)
-        ax.scatter(tp_points.index, tp_points['Mahalanobis_Distance'], color='red', label='TP', alpha=0.9, marker='X', edgecolors='black', s=70)
-        ax.scatter(fp_points.index, fp_points['Mahalanobis_Distance'], color='green', label='FP (Type I)', s=70)
-        ax.scatter(fn_points.index, fn_points['Mahalanobis_Distance'], color='purple', label='FN (Type II)', s=70, marker='x')
+        # Identify classification categories for visual validation
+        # TN: True Normal, TP: True Abnormal, FP: Type I Error, FN: Type II Error
+        tn_pts = result_df[(~result_df['is_abnormal']) & (result_df[self.status_col] == self.normal_status)]
+        tp_pts = result_df[(result_df['is_abnormal']) & (result_df[self.status_col] != self.normal_status)]
+        fp_pts = result_df[(result_df['is_abnormal']) & (result_df[self.status_col] == self.normal_status)]
+        fn_pts = result_df[(~result_df['is_abnormal']) & (result_df[self.status_col] != self.normal_status)]
+
+        ax.scatter(tn_pts.index, tn_pts['Mahalanobis_Distance'], color='blue', label='TN', alpha=0.6, s=15)
+        ax.scatter(tp_pts.index, tp_pts['Mahalanobis_Distance'], color='red', label='TP', alpha=0.9, marker='X', edgecolors='black', s=70)
+        ax.scatter(fp_pts.index, fp_pts['Mahalanobis_Distance'], color='green', label='FP (Type I)', s=70)
+        ax.scatter(fn_pts.index, fn_pts['Mahalanobis_Distance'], color='purple', label='FN (Type II)', s=70, marker='x')
+        
         ax.axhline(y=self.md_threshold, color='black', linestyle='--', label=f'Threshold ({self.md_threshold:.2f})')
         ax.set_title(title, fontsize=9, fontweight='bold')
+        ax.set_xlabel('Sample Index')
+        ax.set_ylabel('MD Value')
         ax.legend(fontsize='x-small', loc='upper left')
-        ax.grid(True)
-        if set_ylim: ax.set_ylim(*set_ylim)
+        ax.grid(True, alpha=0.3)
+        if set_ylim: 
+            ax.set_ylim(set_ylim)
 
-    draw_error_scatter(axes[5, 0], 'Errors: 1. Overall View', set_ylim=(0, y_max_overall))
-    draw_error_scatter(axes[5, 1], 'Errors: 2. Zoom Normal', set_ylim=(0, y_max_normal))
-    draw_error_scatter(axes[5, 2], 'Errors: 3. Zoom Thresholds', set_ylim=(max(0, min_t * 0.9), max_t * 1.1))
-    
+    # Plotting the error scatters across the bottom row
+    draw_error_scatter(axes[5, 0], 'Type I/II Error: 1. Overall View', set_ylim=(0, y_max_overall))
+    draw_error_scatter(axes[5, 1], 'Type I/II Error: 2. Zoom Near Normal', set_ylim=(0, y_max_normal))
+    draw_error_scatter(axes[5, 2], 'Type I/II Error: 3. Zoom Near Thresholds', set_ylim=(max(0, min_t * 0.9), max_t * 1.1))
+
     plt.tight_layout()
     if save_filename:
-        os.makedirs(os.path.dirname(save_filename), exist_ok=True)
+        # Ensure target directory exists
+        if os.path.dirname(save_filename):
+            os.makedirs(os.path.dirname(save_filename), exist_ok=True)
         plt.savefig(save_filename, dpi=300)
     else:
         plt.show()
