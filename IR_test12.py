@@ -417,18 +417,6 @@ class MTS:
             ax.grid(True, linestyle=':', alpha=0.7)
             ax.legend(fontsize='x-small', loc='upper right' if set_ylim else 'upper left')
             if set_ylim: ax.set_ylim(*set_ylim)
-
-        # Helper function for Distribution Plots (Rows R_start and R_start+1)
-To make this 100% crash-proof, I have replaced the Greek symbols with "Ohms" and added a robust cleaning function at the start. This version ensures that hidden Excel characters (BOM) and LaTeX formatting won't break the Matplotlib engine.
-
-Here is the complete, sanitized main() function and the updated MTS class method.
-Part 1: The Robust main() Function
-
-Replace the start of your main() with this logic to ensure columns are cleaned before any processing happens.
-Python
-
-def main():
-    # ... (args parsing) ...
     
     # 1. Load data
     raw_df = pd.read_csv(input_file)
