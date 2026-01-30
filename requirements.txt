@@ -6,3 +6,4 @@ scipy
 scikit-learn
 streamlit
 altair
+pyarrow
