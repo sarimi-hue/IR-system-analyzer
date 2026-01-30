@@ -685,8 +685,8 @@ class MTS:
                 ax2.set_ylim(pos[1] - height * padding, pos[1] + height * padding)
                 
                 ax2.set_title(f'Mahalanobis Oval (Zoomed on Normal Space)', fontweight='bold')
-                ax2.set_xlabel(f'{feat1} ($\Omega$)')
-                ax2.set_ylabel(f'{feat2} ($\Omega$)')
+                ax2.set_xlabel(rf'{feat1} ($\Omega$)')
+                ax2.set_ylabel(rf'{feat2} ($\Omega$)')
                 ax2.legend()
             
             plt.tight_layout()
@@ -1027,11 +1027,11 @@ def main():
             raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
     raw_df.columns = raw_df.columns.str.strip()
     raw_df['original_row_number'] = raw_df.index + 1
-
+    print(f"Columns found in file: {raw_df.columns.tolist()}")
     # Stage 1: Filter
     filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(raw_df, electrical_features, ir_thresholds)
     filtered_df.to_csv(output_filtered_file, index=False)
-
+    
     # Stage 2: MTS
     mts_analyzer = MTS(filtered_df, features=electrical_features, status_col='Actual_Status', 
                        normal_status='OK', ir_thresholds=ir_thresholds)
