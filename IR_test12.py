@@ -419,7 +419,8 @@ class MTS:
             if set_ylim: ax.set_ylim(*set_ylim)
     
     # 1. Load data
-    raw_df = pd.read_csv(input_file)
+    def load_data(self, file_path):
+    raw_df = pd.read_csv(file_path)
     
     # 2. NUCLEAR CLEANING: Remove BOM, LaTeX, and special characters
     raw_df['original_row_number'] = raw_df.index + 1
