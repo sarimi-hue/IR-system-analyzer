@@ -67,6 +67,10 @@ def process_machine_data():
 
     except Exception as e:
         print(f"❌ Error in data_machine.py: {e}")
+import sys
+# ... at the very end of the script ...
+input_filename = sys.argv[1]
+df.to_csv(f"Machine_NG_ONLY_{input_filename}", index=False)
 
 if __name__ == "__main__":
     process_machine_data()
