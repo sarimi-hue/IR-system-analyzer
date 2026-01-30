@@ -418,20 +418,18 @@ class MTS:
             ax.legend(fontsize='x-small', loc='upper right' if set_ylim else 'upper left')
             if set_ylim: ax.set_ylim(*set_ylim)
     
-    def fit_and_predict(self, input_file, secondary_threshold_percentile=95):
-        # 1. Load the data inside this method
+    def process_data(self, input_file):
+        # 1. Load the data into the local variable 'raw_df'
         raw_df = pd.read_csv(input_file)
         
-        # 2. Now 'raw_df' exists, so we can add the row number
+        # 2. Add the row number (this won't crash now because raw_df is defined above)
         raw_df['original_row_number'] = raw_df.index + 1
         
-        # 3. Store it to 'self' so the rest of the class can use it later
+        # 3. Save it to 'self' so other functions (like plotting) can find it
         self.raw_df = raw_df
-
+        
+        print(f"Successfully loaded {len(raw_df)} rows.")
         return raw_df
-    
-    # 2. NUCLEAR CLEANING: Remove BOM, LaTeX, and special characters
-    raw_df['original_row_number'] = raw_df.index + 1
     
     def total_clean(text):
         # Remove BOM and non-ascii characters
