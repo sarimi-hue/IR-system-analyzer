@@ -418,10 +418,17 @@ class MTS:
             ax.legend(fontsize='x-small', loc='upper right' if set_ylim else 'upper left')
             if set_ylim: ax.set_ylim(*set_ylim)
     
-    # 1. Load data
     def load_data(self, file_path):
+        # 1. Load the file
         raw_df = pd.read_csv(file_path)
-        return raw_df
+        
+        # 2. Immediately add the row numbers to the local variable
+        raw_df['original_row_number'] = raw_df.index + 1
+        
+        # 3. Save it to 'self' so the rest of the class (plotting/calculation) can see it
+        self.raw_df = raw_df
+        
+        return self.raw_df
     
     # 2. NUCLEAR CLEANING: Remove BOM, LaTeX, and special characters
     raw_df['original_row_number'] = raw_df.index + 1
