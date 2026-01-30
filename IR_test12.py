@@ -1064,11 +1064,11 @@ def main():
     md_export_df.to_csv(md_output_file, index=False)
     print(f"Full Mahalanobis Distances exported to: {md_output_file}")
 
-    # If the column was lost during processing, recreate it from the index
     if 'original_row_number' not in result_df.columns:
+        # Re-attach the row numbers based on the index
         result_df['original_row_number'] = result_df.index + 1
 
-    # Now this line (your line 1068) will work:
+    # This is the line that was crashing:
     md_export_df = result_df[['original_row_number', 'Mahalanobis_Distance']].copy()
 
     # HOTELLING'S T2 for comparing with benchmark~
