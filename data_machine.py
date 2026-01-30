@@ -14,63 +14,44 @@ def process_machine_data():
         df = pd.read_csv(input_file, sep=None, engine='python')
         df = df.dropna(how='all').reset_index(drop=True) 
         
-        # 1. Add Sample no. FIRST
-        df.insert(0, 'Sample no.', range(1, len(df) + 1)) 
+        # 1. Add 'Serial No' (Crucial for the NG_compare matching)
+        # We use the Sample number as the Serial No for the join
+        if 'Serial No' not in df.columns:
+            df.insert(0, 'Serial No', range(1, len(df) + 1)) 
+            # Convert to string to ensure matching works later
+            df['Serial No'] = df['Serial No'].astype(str)
 
-        # 2. FIXED HEADER MAPPING
-        # We manually map the columns to ensure IR2, IR3, and IR4 are preserved
-        # This assumes your raw machine CSV has: [Val1, Stat1, Val2, Stat2, Val3, Stat3]
-        # after we added the 'Sample no.' at index 0.
-        
+        # 2. Map the columns
         if len(df.columns) >= 7:
-            new_cols = ['Sample no.', 'IR2_Val', 'Status_IR2', 'IR3_Val', 'Status_IR3', 'IR4_Val', 'Status_IR4']
-            # Only apply if column count matches expectations
+            # We preserve the Serial No at index 0
+            new_cols = ['Serial No', 'IR2_Val', 'Status_IR2', 'IR3_Val', 'Status_IR3', 'IR4_Val', 'Status_IR4']
             df.columns = new_cols[:len(df.columns)]
-        else:
-            # Fallback for unexpected formats
-            print("!! Warning: Unexpected column count. Using dynamic naming.")
-            new_cols = list(df.columns)
-            for i in range(1, len(new_cols)):
-                if "Status" in str(new_cols[i]) or i % 2 == 0:
-                    new_cols[i] = f"Status_IR{(i+1)//2}"
-                else:
-                    new_cols[i] = f"IR{(i+1)//2}_Val"
-            df.columns = new_cols
-
+        
         # 3. Standardize Status Values
         status_cols = [c for c in df.columns if 'Status' in c]
         for col in status_cols:
             df[col] = df[col].astype(str).str.strip().str.upper()
             df[col] = df[col].apply(lambda x: 'OK' if x in ['OK', 'NORMAL', 'PASS'] else 'NG')
 
-        # 4. Identify NG Rows
-        # We check the status columns for 'NG'
+        # 4. Filter for NG Rows (The comparison script expects only failures)
         mask2 = df['Status_IR2'] == 'NG' if 'Status_IR2' in df.columns else False
         mask3 = df['Status_IR3'] == 'NG' if 'Status_IR3' in df.columns else False
         mask4 = df['Status_IR4'] == 'NG' if 'Status_IR4' in df.columns else False
         
-        any_ng_mask = (mask2 | mask3 | mask4)
+        df_ng = df[mask2 | mask3 | mask4].reset_index(drop=True)
 
-        # 5. KEEP ALL ROWS for the comparison script, but mark the output
-        # If you strictly want ONLY NG rows, uncomment the next line:
-        # df = df[any_ng_mask].reset_index(drop=True)
-
-        # 6. Save output
-        output_name = f"Machine_NG_{os.path.basename(input_file)}"
-        df.to_csv(output_name, index=False, encoding='utf-8-sig')
+        # 5. Save output with the EXACT name Streamlit is looking for
+        # We use ONLY the filename, no paths, to stay in the root folder
+        base_filename = os.path.basename(input_file)
+        output_name = f"Machine_NG_ONLY_{base_filename}"
         
-        print("\n" + "="*40)
-        print(f"✅ Processed: {os.path.basename(input_file)}")
-        print(f"Headers: {list(df.columns)}")
-        print(f"File saved as: {output_name}")
-        print("="*40)
+        df_ng.to_csv(output_name, index=False, encoding='utf-8-sig')
+        
+        print(f"✅ Machine NG list created: {output_name}")
 
     except Exception as e:
         print(f"❌ Error in data_machine.py: {e}")
-import sys
-# ... at the very end of the script ...
-input_filename = sys.argv[1]
-df.to_csv(f"Machine_NG_ONLY_{input_filename}", index=False)
+        sys.exit(1) # Tell Streamlit something went wrong
 
 if __name__ == "__main__":
     process_machine_data()
