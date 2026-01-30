@@ -419,291 +419,268 @@ class MTS:
             if set_ylim: ax.set_ylim(*set_ylim)
 
         # Helper function for Distribution Plots (Rows R_start and R_start+1)
-        def plot_distributions(feature_set, data_df_all, data_df_ok, median_ok_stats, std_ok_stats, raw_median_stats, raw_std_stats, ir_thresholds_stats, R_start, scale_label):
+To make this 100% crash-proof, I have replaced the Greek symbols with "Ohms" and added a robust cleaning function at the start. This version ensures that hidden Excel characters (BOM) and LaTeX formatting won't break the Matplotlib engine.
+
+Here is the complete, sanitized main() function and the updated MTS class method.
+Part 1: The Robust main() Function
+
+Replace the start of your main() with this logic to ensure columns are cleaned before any processing happens.
+Python
+
+def main():
+    # ... (args parsing) ...
+    
+    # 1. Load data
+    raw_df = pd.read_csv(input_file)
+    
+    # 2. NUCLEAR CLEANING: Remove BOM, LaTeX, and special characters
+    raw_df['original_row_number'] = raw_df.index + 1
+    
+    def total_clean(text):
+        # Remove BOM and non-ascii characters
+        text = str(text).replace('\ufeff', '')
+        text = "".join(i for i in text if ord(i) < 128)
+        # Remove LaTeX symbols and backslashes
+        text = text.replace('$', '').replace('\\', '').replace('Omega', 'Ohms').replace('ohm', 'Ohms')
+        return text.strip()
+
+    raw_df.columns = [total_clean(c) for c in raw_df.columns]
+
+    # 3. DEFINE THE MAPPING (Uses cleaned names)
+    mapping = {}
+    for col in raw_df.columns:
+        col_up = col.upper()
+        if 'IR2' in col_up and 'STATUS' not in col_up: mapping['IR2'] = col
+        if 'IR3' in col_up and 'STATUS' not in col_up: mapping['IR3'] = col
+        if 'IR4' in col_up and 'STATUS' not in col_up: mapping['IR4'] = col
+
+    # 4. Check if found
+    if not all(k in mapping for k in ['IR2', 'IR3', 'IR4']):
+        print(f"❌ Error: Could not find numeric IR2/3/4 columns.")
+        sys.exit(1)
+
+    # 5. Features and Thresholds
+    electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
+    ir_thresholds = {
+        mapping['IR2']: float(args.ir2_threshold),
+        mapping['IR3']: float(args.ir3_threshold),
+        mapping['IR4']: float(args.ir4_threshold)
+    }
+
+    # 6. Numeric Cleaning
+    for col in electrical_features:
+        raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
+
+    # 7. Run Filtering
+    filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(
+        raw_df, electrical_features, ir_thresholds
+    )
+
+    # 8. Run MTS Analysis
+    mts_analyzer = MTS(filtered_df, features=electrical_features, status_col='Actual_Status', 
+                       normal_status='OK', ir_thresholds=ir_thresholds)
+    result_df = mts_analyzer.detect_abnormal(md_quantile=args.md_quantile)
+    error_summary = mts_analyzer.calculate_type1_type2_errors(result_df)
+    
+    # 9. EXPORT & METRICS
+    md_output_file = os.path.join(output_folder, f'MD_{base_name}.csv')
+    try:
+        md_export_df = result_df[['original_row_number', 'Mahalanobis_Distance']].copy()
+        md_export_df.rename(columns={'original_row_number': 'data no', 'Mahalanobis_Distance': 'MD'}, inplace=True)
+        md_export_df.to_csv(md_output_file, index=False)
+        print(f"✅ Export Success: {md_output_file}")
+    except Exception as e:
+        print(f"⚠️ Export failed: {e}")
+
+    metrics_data = [
+        {'Metric': 'N_actual normal', 'Value': error_summary['N_Actual_Normal']},
+        {'Metric': 'N_actual abnormal', 'Value': error_summary['N_Actual_Abnormal']},
+        {'Metric': 'Type I Error (FP)', 'Value': f"{error_summary['Type_I_Error_Rate']:.2%}"},
+        {'Metric': 'Type II Error (FN)', 'Value': f"{error_summary.get('Type_II_Error_Rate', 0):.2%}"}
+    ]
+
+    # 10. PLOTTING
+    output_plot_file = os.path.join(output_folder, f'Plot_{base_name}.png')
+    mts_analyzer.plot_results(result_df, secondary_threshold_percentile=args.plot_t2, save_filename=output_plot_file)
+
+Part 2: The Fixed plot_results Method
+
+Update the plot_distributions helper inside your MTS class to remove the LaTeX formatting.
+Python
+
+def plot_distributions(feature_set, data_df_all, data_df_ok, median_ok_stats, std_ok_stats, raw_median_stats, raw_std_stats, ir_thresholds_stats, R_start, scale_label):
+        for i, feature in enumerate(feature_set):
+            # 1. Clean the feature name for labeling (Safe for Matplotlib)
+            clean_name = str(feature).replace('ln(', '').replace(')', '').replace('$', '').replace('\\', '').strip()
             
-            for i, feature in enumerate(feature_set):
+            # 2. Build simple text-based labels (No LaTeX to prevent crashing)
+            if scale_label == 'Linear Scale':
+                feature_label = f"{clean_name} (Ohms)"
+            else:
+                feature_label = f"ln({clean_name})"
                 
-                # Use the original feature name for the axis title if it's a log feature
-                original_feature_name = feature.replace('ln(', '').replace(')', '')
-                # X-axis label includes scale information
-                feature_label = rf'{original_feature_name} ($\\Omega$)' if scale_label == 'Linear Scale' else f'$\\ln$({original_feature_name})'
-                
-                # Check for data existence
-                if data_df_ok.empty or median_ok_stats is None or std_ok_stats is None:
-                    axes[R_start, i].set_title(f'No Normal Data for {feature_label}', fontsize=9)
-                    axes[R_start + 1, i].set_title(f'No Normal Data for {feature_label}', fontsize=9)
-                    axes[R_start, i].set_ylabel('Number of Samples') 
-                    axes[R_start + 1, i].set_ylabel('Number of Samples') 
-                    continue
+            # Check for data existence
+            if data_df_ok.empty or median_ok_stats is None or std_ok_stats is None:
+                axes[R_start, i].set_title(f'No Normal Data for {feature_label}', fontsize=9)
+                axes[R_start + 1, i].set_title(f'No Normal Data for {feature_label}', fontsize=9)
+                axes[R_start, i].set_ylabel('Number of Samples') 
+                axes[R_start + 1, i].set_ylabel('Number of Samples') 
+                continue
 
-                # CALCULATE TIGHT LIMITS
-                median_ok = median_ok_stats[feature]
-                std_ok = std_ok_stats[feature]
-                ir_threshold_val = ir_thresholds_stats.get(feature, None)
+            # CALCULATE TIGHT LIMITS
+            median_ok = median_ok_stats[feature]
+            std_ok = std_ok_stats[feature]
+            ir_threshold_val = ir_thresholds_stats.get(feature, None)
+            
+            # 1. Initial limits based on 4-sigma of the *clean* data
+            if std_ok <= 1e-9: # Handle near-zero variance
+                X_RANGE = 1e-7 if scale_label == 'Linear Scale' else 0.5
+                x_min_limit = median_ok - X_RANGE
+                x_max_limit = median_ok + X_RANGE
+                zero_std_flag = True
+            else:
+                x_min_limit = median_ok - 4 * std_ok 
+                x_max_limit = median_ok + 4 * std_ok
+                zero_std_flag = False
+            
+            # 2. Incorporate 4-sigma of the *raw* data
+            raw_median = raw_median_stats[feature]
+            raw_std = raw_std_stats[feature]
+            raw_4sigma_min = raw_median - 4 * raw_std
+            raw_4sigma_max = raw_median + 4 * raw_std
+            
+            x_min_limit = min(x_min_limit, raw_4sigma_min)
+            x_max_limit = max(x_max_limit, raw_4sigma_max)
                 
-                # 1. Initial limits based on 4-sigma of the *clean* data (the MTS reference)
-                if std_ok <= 1e-9: # Handle near-zero variance
-                    X_RANGE = 1e-7 if scale_label == 'Linear Scale' else 0.5 # Small range for linear, 0.5 for log
-                    x_min_limit = median_ok - X_RANGE
-                    x_max_limit = median_ok + X_RANGE
-                    zero_std_flag = True
-                else:
-                    x_min_limit = median_ok - 4 * std_ok 
-                    x_max_limit = median_ok + 4 * std_ok
-                    zero_std_flag = False
-                
-                # 2. Incorporate 4-sigma of the *raw* data to ensure it's visible 
-                raw_median = raw_median_stats[feature]
-                raw_std = raw_std_stats[feature]
-                raw_4sigma_min = raw_median - 4 * raw_std
-                raw_4sigma_max = raw_median + 4 * raw_std
-                
-                # Use the min and max of the combined 4-sigma ranges to set the overall boundary
-                x_min_limit = min(x_min_limit, raw_4sigma_min)
-                x_max_limit = max(x_max_limit, raw_4sigma_max)
-                    
-                # 3. Final Check: Ensure the IR specification is also included if it's even further out
-                if ir_threshold_val is not None:
-                     if ir_threshold_val < x_min_limit:
-                         # Adjust the minimum limit to comfortably include the IR threshold
-                         x_min_limit = ir_threshold_val * 0.95 if ir_threshold_val > 0 and scale_label == 'Linear Scale' else ir_threshold_val - 0.1 # Adjust slightly differently for log
-                     elif ir_threshold_val > x_max_limit:
-                          x_max_limit = ir_threshold_val * 1.05 if ir_threshold_val > 0 and scale_label == 'Linear Scale' else ir_threshold_val + 0.1
+            # 3. Final Check: Ensure IR spec is included
+            if ir_threshold_val is not None:
+                if ir_threshold_val < x_min_limit:
+                    x_min_limit = ir_threshold_val * 0.95 if ir_threshold_val > 0 and scale_label == 'Linear Scale' else ir_threshold_val - 0.1
+                elif ir_threshold_val > x_max_limit:
+                    x_max_limit = ir_threshold_val * 1.05 if ir_threshold_val > 0 and scale_label == 'Linear Scale' else ir_threshold_val + 0.1
 
-                bins_setting = 20 if original_feature_name == 'IR2' else None 
-                
-                # Outliers relative to the *final* determined plot limits
-                raw_data_for_feature = data_df_all[feature].dropna()
-                left_outliers = raw_data_for_feature[raw_data_for_feature < x_min_limit]
-                right_outliers = raw_data_for_feature[raw_data_for_feature > x_max_limit]       
+            bins_setting = 20 if 'IR2' in clean_name.upper() else None 
+            
+            # Outliers relative to the *final* determined plot limits
+            raw_data_for_feature = data_df_all[feature].dropna()
+            left_outliers = raw_data_for_feature[raw_data_for_feature < x_min_limit]
+            right_outliers = raw_data_for_feature[raw_data_for_feature > x_max_limit]       
 
-                # Row R_start + 1: Cleaned "OK" Data Distribution (Plot first to get Y_max)
-                ax_row2 = axes[R_start + 1, i]
-                hist_kwargs_r2 = {'data': data_df_ok, 'x': feature, 'ax': ax_row2, 'color': 'blue', 'label': f'Natural (OK) Data Distribution ({scale_label})', 'kde': True, 'stat': 'count'}
-                if bins_setting is not None: hist_kwargs_r2['bins'] = bins_setting
-                
-                if zero_std_flag:
-                    # Manually plot for zero variance data with clearer annotation
-                    ax_row2.axvline(median_ok, color='blue', linestyle='-', linewidth=10, alpha=0.3, label='Zero Variance Data')
-                    ax_row2.text(median_ok, len(data_df_ok) * 0.5, f'Data Constant\nValue: {median_ok:.2e}', 
-                                 horizontalalignment='center', color='darkblue', fontsize=10, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
-                    ax_row2.set_ylim(0, len(data_df_ok) * 1.1)
-                    ax_row2.set_xlim(x_min_limit, x_max_limit) # Apply limits here too
-                else:
-                    sns.histplot(**hist_kwargs_r2)
-                    
-                if not zero_std_flag: # Only add lines if there's actual variance to show them relative to
-                    # Reference Lines for Row 2 (Only 3-Sigma and IR Spec)
-                    ax_row2.axvline(median_ok, color='darkblue', linestyle='--', label='Median (OK)')
-                    ax_row2.axvline(median_ok + 3 * std_ok, color='green', linestyle='--', label='+3 Sigma (OK)')
-                    ax_row2.axvline(median_ok - 3 * std_ok, color='green', linestyle='--', label='-3 Sigma (OK)')
-                
-                # IR Spec lines 
-                if ir_threshold_val is not None: 
-                    ax_row2.axvline(ir_threshold_val, color='purple', linestyle='-.', label=f'IR Threshold') # Remove value to avoid clutter
-                
-                ax_row2.set_title(f'Cleaned "OK" Distribution of {original_feature_name} ({scale_label})', fontsize=9)
-                ax_row2.set_ylabel('Number of Samples') 
-                ax_row2.set_xlabel(feature_label) 
-                ax_row2.legend(fontsize='small') 
-                if not zero_std_flag: ax_row2.set_xlim(x_min_limit, x_max_limit)
+            # Row R_start + 1: Cleaned "OK" Data Distribution
+            ax_row2 = axes[R_start + 1, i]
+            hist_kwargs_r2 = {'data': data_df_ok, 'x': feature, 'ax': ax_row2, 'color': 'blue', 'label': 'Natural (OK) Data', 'kde': True, 'stat': 'count'}
+            if bins_setting is not None: hist_kwargs_r2['bins'] = bins_setting
+            
+            if zero_std_flag:
+                ax_row2.axvline(median_ok, color='blue', linestyle='-', linewidth=10, alpha=0.3, label='Zero Variance')
+                ax_row2.text(median_ok, len(data_df_ok) * 0.5, f'Constant: {median_ok:.2e}', ha='center', bbox=dict(facecolor='white', alpha=0.8))
+                ax_row2.set_ylim(0, len(data_df_ok) * 1.1)
+                ax_row2.set_xlim(x_min_limit, x_max_limit)
+            else:
+                sns.histplot(**hist_kwargs_r2)
+                ax_row2.axvline(median_ok, color='darkblue', linestyle='--', label='Median (OK)')
+                ax_row2.axvline(median_ok + 3 * std_ok, color='green', linestyle='--', label='+3 Sigma (OK)')
+                ax_row2.axvline(median_ok - 3 * std_ok, color='green', linestyle='--')
+            
+            if ir_threshold_val is not None: 
+                ax_row2.axvline(ir_threshold_val, color='purple', linestyle='-.', label='IR Threshold')
+            
+            ax_row2.set_title(f'Cleaned Distribution: {clean_name} ({scale_label})', fontsize=9)
+            ax_row2.set_xlabel(feature_label) 
+            ax_row2.legend(fontsize='x-small') 
+            if not zero_std_flag: ax_row2.set_xlim(x_min_limit, x_max_limit)
 
-                # Row R_start: Raw Data Distribution (Plot second)
-                ax_row1 = axes[R_start, i]
-                
-                if zero_std_flag:
-                    # Manually plot for zero variance data with clearer annotation
-                    ax_row1.axvline(median_ok, color='blue', linestyle='-', linewidth=10, alpha=0.3, label='Zero Variance Data')
-                    ax_row1.text(median_ok, len(data_df_all) * 0.5, f'Data Constant\nValue: {median_ok:.2e}', 
-                                 horizontalalignment='center', color='darkblue', fontsize=10, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
-                    ax_row1.set_ylim(0, len(data_df_all) * 1.1)
-                else:
-                    # Use fill=False to contrast Raw (outline) and Cleaned (filled)
-                    hist_kwargs_r1 = {
-                        'data': data_df_all, 'x': feature, 'ax': ax_row1, 'color': 'black', 
-                        'label': f'Raw Data Distribution ({scale_label})', 'kde': True, 'stat': 'count', 
-                        'line_kws': {'linestyle': '-', 'color': 'black'}, 'fill': False 
-                    }
-                    if bins_setting is not None: hist_kwargs_r1['bins'] = bins_setting
-                    
-                    sns.histplot(**hist_kwargs_r1)
-                    
-                    # Plot Raw reference lines
-                    median_val, std_val = raw_median_stats[feature], raw_std_stats[feature]
-                    ax_row1.axvline(median_val, color='darkgray', linestyle=':', label='Median (Raw)')
-                    
-                    # Include 3 sigma lines if they fall within the 4-sigma OK zoom window
-                    if (median_val + 3 * std_val) > x_min_limit and (median_val - 3 * std_val) < x_max_limit:
-                         ax_row1.axvline(median_val + 3 * std_val, color='red', linestyle='--', label='+3 Sigma (Raw)')
-                         ax_row1.axvline(median_val - 3 * std_val, color='red', linestyle='--', label='-3 Sigma (Raw)')
-                    
-                # IR Spec lines (show)
-                if ir_threshold_val is not None: ax_row1.axvline(ir_threshold_val, color='purple', linestyle='-.', label=f'IR Threshold')
-                
-                ax_row1.set_title(f'Raw Data Distribution of {original_feature_name} ({scale_label})', fontsize=9)
-                ax_row1.set_ylabel('Number of Samples') 
-                ax_row1.set_xlabel(feature_label) 
-                ax_row1.legend(fontsize='small') 
-                
-                # Apply X-Axis Limit only (Keeping flexible Y-axis)
-                ax_row1.set_xlim(x_min_limit, x_max_limit) 
-                
-                # Add arrows for outliers (applied to all features now)
-                if not zero_std_flag:
-                    # Get the dynamically set Y-max for annotation positioning
-                    y_max_for_anno = ax_row1.get_ylim()[1] 
-                    
-                    if not left_outliers.empty: 
-                       ax_row1.annotate(f'<{len(left_outliers)} pts', 
-                                        xy=(x_min_limit, y_max_for_anno * 0.9), 
-                                        xytext=(x_min_limit + (x_max_limit-x_min_limit)*0.05, y_max_for_anno * 0.8),
-                                        arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5),
-                                        fontsize=8, ha='left', color='red')
-                    if not right_outliers.empty: 
-                        ax_row1.annotate(f'{len(right_outliers)} pts>', 
-                                        xy=(x_max_limit, y_max_for_anno * 0.9), 
-                                        xytext=(x_max_limit - (x_max_limit-x_min_limit)*0.05, y_max_for_anno * 0.8),
-                                        arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5),
-                                        fontsize=8, ha='right', color='red')
+            # Row R_start: Raw Data Distribution
+            ax_row1 = axes[R_start, i]
+            if zero_std_flag:
+                ax_row1.axvline(median_ok, color='blue', linestyle='-', linewidth=10, alpha=0.3)
+                ax_row1.set_ylim(0, len(data_df_all) * 1.1)
+            else:
+                hist_kwargs_r1 = {'data': data_df_all, 'x': feature, 'ax': ax_row1, 'color': 'black', 'label': 'Raw Data', 'kde': True, 'stat': 'count', 'fill': False}
+                if bins_setting is not None: hist_kwargs_r1['bins'] = bins_setting
+                sns.histplot(**hist_kwargs_r1)
+                ax_row1.axvline(raw_median, color='darkgray', linestyle=':', label='Median (Raw)')
+                if (raw_median + 3 * raw_std) > x_min_limit and (raw_median - 3 * raw_std) < x_max_limit:
+                     ax_row1.axvline(raw_median + 3 * raw_std, color='red', linestyle='--', label='+3 Sigma (Raw)')
+                     ax_row1.axvline(raw_median - 3 * raw_std, color='red', linestyle='--')
+            
+            if ir_threshold_val is not None: ax_row1.axvline(ir_threshold_val, color='purple', linestyle='-.', label='IR Threshold')
+            
+            ax_row1.set_title(f'Raw Distribution: {clean_name} ({scale_label})', fontsize=9)
+            ax_row1.set_xlabel(feature_label) 
+            ax_row1.legend(fontsize='x-small') 
+            ax_row1.set_xlim(x_min_limit, x_max_limit) 
+            
+            if not zero_std_flag:
+                y_max_for_anno = ax_row1.get_ylim()[1] 
+                if not left_outliers.empty: 
+                   ax_row1.annotate(f'<{len(left_outliers)} pts', xy=(x_min_limit, y_max_for_anno * 0.9), xytext=(x_min_limit + (x_max_limit-x_min_limit)*0.05, y_max_for_anno * 0.8),
+                                    arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5), fontsize=8, color='red')
+                if not right_outliers.empty: 
+                    ax_row1.annotate(f'{len(right_outliers)} pts>', xy=(x_max_limit, y_max_for_anno * 0.9), xytext=(x_max_limit - (x_max_limit-x_min_limit)*0.05, y_max_for_anno * 0.8),
+                                    arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5), fontsize=8, color='red', ha='right')
+
+    # 3. CALL LINEAR PLOTS
+    plot_distributions(self.features, result_df, self.normal_data, self.median_3sigma, self.std_3sigma, self.raw_median, self.raw_std, self.ir_thresholds, R_start=0, scale_label='Linear Scale')
+    
+    # 4. CALL LOG PLOTS
+    plot_distributions(log_features, log_df, log_normal_data, log_median_ok, log_std_ok, log_raw_median, log_raw_std, log_ir_thresholds, R_start=2, scale_label='Log Scale')
+
+    # 5. MD PLOTS (Row 5)
+    draw_md_scatter(axes[4, 0], 'MD Analysis: 1. Overall View', set_ylim=(0, y_max_overall))
+    draw_md_scatter(axes[4, 1], f'MD Analysis: 2. Zoom Near Normal (0 to {y_max_normal:.2f})', set_ylim=(0, y_max_normal))
+    
+    min_t, max_t = min(self.md_threshold, secondary_md_threshold), max(self.md_threshold, secondary_md_threshold)
+    draw_md_scatter(axes[4, 2], 'MD Analysis: 3. Zoom Thresholds', set_ylim=(max(0, min_t * 0.9), max_t * 1.1))
+
+    # 6. ERROR PLOTS (Row 6)
+    def draw_error_scatter(ax, title, set_ylim=None):
+        ax.scatter(tn_points.index, tn_points['Mahalanobis_Distance'], color='blue', label='TN', alpha=0.6, s=15)
+        ax.scatter(tp_points.index, tp_points['Mahalanobis_Distance'], color='red', label='TP', alpha=0.9, marker='X', edgecolors='black', s=70)
+        ax.scatter(fp_points.index, fp_points['Mahalanobis_Distance'], color='green', label='FP (Type I)', s=70)
+        ax.scatter(fn_points.index, fn_points['Mahalanobis_Distance'], color='purple', label='FN (Type II)', s=70, marker='x')
+        ax.axhline(y=self.md_threshold, color='black', linestyle='--', label=f'Threshold ({self.md_threshold:.2f})')
+        ax.set_title(title, fontsize=9, fontweight='bold')
+        ax.legend(fontsize='x-small', loc='upper left')
+        ax.grid(True)
+        if set_ylim: ax.set_ylim(*set_ylim)
+
+    draw_error_scatter(axes[5, 0], 'Errors: 1. Overall View', set_ylim=(0, y_max_overall))
+    draw_error_scatter(axes[5, 1], 'Errors: 2. Zoom Normal', set_ylim=(0, y_max_normal))
+    draw_error_scatter(axes[5, 2], 'Errors: 3. Zoom Thresholds', set_ylim=(max(0, min_t * 0.9), max_t * 1.1))
+    
+    plt.tight_layout()
+    if save_filename:
+        os.makedirs(os.path.dirname(save_filename), exist_ok=True)
+        plt.savefig(save_filename, dpi=300)
+    else:
+        plt.show()
+
+    def plot_md_distribution_and_oval(self, result_df, save_filename=None):
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        sns.histplot(data=result_df, x='Mahalanobis_Distance', hue='is_abnormal', bins=100, ax=ax1, palette={False: 'blue', True: 'red'})
+        ax1.axvline(self.md_threshold, color='green', linestyle='--')
+        ax1.set_xlim(0, self.md_threshold * 3)
+        ax1.set_title('MD Distribution (Zoomed)')
         
-        # 3. PLOT LINEAR DISTRIBUTIONS (Rows 1 and 2)
-        plot_distributions(
-            self.features, 
-            result_df, 
-            self.normal_data, 
-            self.median_3sigma, 
-            self.std_3sigma, 
-            self.raw_median, 
-            self.raw_std, 
-            self.ir_thresholds, 
-            R_start=0, 
-            scale_label='Linear Scale'
-        )
-        
-        # 4. PLOT LOG DISTRIBUTIONS (Rows 3 and 4)
-        plot_distributions(
-            log_features, 
-            log_df, # Log-transformed data for raw distribution
-            log_normal_data, # Log-transformed data for cleaned distribution
-            log_median_ok, 
-            log_std_ok, 
-            log_raw_median, 
-            log_raw_std, 
-            log_ir_thresholds, # Log-transformed thresholds
-            R_start=2, # Starting row index is 2 (3rd row)
-            scale_label='Log Scale'
-        )
-
-
-        # 5. Row 5 (axes[4, :]): Mahalanobis Distance Plots (Empirical Quantile Analysis)
-        
-        # R5C1: Overall View
-        draw_md_scatter(axes[4, 0], 'MD Empirical Quantile Analysis: 1. Overall View', set_ylim=(0, y_max_overall))
-
-        # R5C2: Zoom Near Normal Zone
-        draw_md_scatter(axes[4, 1], f'MD Empirical Quantile Analysis: 2. Zoom Near Normal (Y-Limit: 0 to {y_max_normal:.2f})', set_ylim=(0, y_max_normal))
-
-        # R5C3: Zoom Around Thresholds 
-        min_t = min(self.md_threshold, secondary_md_threshold)
-        max_t = max(self.md_threshold, secondary_md_threshold)
-        ax3_ylim_min = max(0, min_t * 0.9)
-        ax3_ylim_max = max_t * 1.1 
-        draw_md_scatter(axes[4, 2], 'MD Empirical Quantile Analysis: 3. Zoom Around Thresholds', set_ylim=(ax3_ylim_min, ax3_ylim_max))
-
-        # 6. Row 6 (axes[5, :]): Type I/II Error Visualization
-        def draw_error_scatter(ax, title, set_ylim=None):
-            # Highlight points by classification type
-            ax.scatter(tn_points.index, tn_points['Mahalanobis_Distance'], color='blue', label='TN (Correct Normal)', alpha=0.6, s=15)
-            ax.scatter(tp_points.index, tp_points['Mahalanobis_Distance'], color='red', label='TP (Correct Abnormal)', alpha=0.9, marker='X', edgecolors='black', s=70)
-            ax.scatter(fp_points.index, fp_points['Mahalanobis_Distance'], color='green', label='FP (Type I Error)', s=70, marker='o', linewidth=2)
-            ax.scatter(fn_points.index, fn_points['Mahalanobis_Distance'], color='purple', label='FN (Type II Error)', s=70, marker='x')
-            ax.axhline(y=self.md_threshold, color='black', linestyle='--', label=f'Classification Threshold ({self.md_threshold:.2f})')
-            ax.set_title(title, fontsize=9, fontweight='bold')
-            ax.set_xlabel('Sample Index')
-            ax.set_ylabel('Mahalanobis Distance')
-            ax.legend(fontsize='x-small', loc='upper left')
-            ax.grid(True)
-            if set_ylim: ax.set_ylim(*set_ylim)
-
-        # R6C1: Error Overall View
-        draw_error_scatter(axes[5, 0], 'Type I/II Error: 1. Overall View', set_ylim=(0, y_max_overall))
-        
-        # R6C2: Error Zoom Near Normal (close to threshold)
-        draw_error_scatter(axes[5, 1], 'Type I/II Error: 2. Zoom Near Normal', set_ylim=(0, y_max_normal))
-
-        # R6C3: Error Zoom Near Thresholds
-        draw_error_scatter(axes[5, 2], 'Type I/II Error: 3. Zoom Near Thresholds', set_ylim=(ax3_ylim_min, ax3_ylim_max))
+        if len(self.features) >= 2:
+            feat1, feat2 = self.features[0], self.features[1]
+            sns.scatterplot(data=result_df, x=feat1, y=feat2, hue='is_abnormal', palette={False: 'blue', True: 'red'}, ax=ax2, alpha=0.5)
+            # Ellipse logic
+            cov = self.normal_data[[feat1, feat2]].cov().values
+            pos = self.normal_data[[feat1, feat2]].median().values
+            vals, vecs = np.linalg.eigh(cov)
+            theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+            width, height = 2 * np.sqrt(self.md_threshold * vals)
+            ellipse = patches.Ellipse(xy=pos, width=width, height=height, angle=theta, edgecolor='green', fc='none', lw=2, linestyle='--')
+            ax2.add_patch(ellipse)
+            ax2.set_xlim(pos[0] - width, pos[0] + width)
+            ax2.set_ylim(pos[1] - height, pos[1] + height)
+            ax2.set_xlabel(f'{feat1} (Ohms)')
+            ax2.set_ylabel(f'{feat2} (Ohms)')
         
         plt.tight_layout()
-        
-        if save_filename:
-            try:
-                # Ensure directory exists before saving
-                os.makedirs(os.path.dirname(save_filename), exist_ok=True)
-                plt.savefig(save_filename, dpi=300) 
-                print(f"\nFigure successfully saved as '{save_filename}'")
-            except Exception as e:
-                print(f"\nWarning: Could not save figure to file {save_filename}. Error: {e}. Showing plot instead.")
-                plt.show()
-        else:
-            plt.show()
-
-        def plot_md_distribution_and_oval(self, result_df, save_filename=None):
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-            
-            # PANEL 1: MD Distribution (Zoomed)
-            sns.histplot(data=result_df, x='Mahalanobis_Distance', hue='is_abnormal', 
-                         bins=100, ax=ax1, palette={False: 'blue', True: 'red'}, alpha=0.6)
-            ax1.axvline(self.md_threshold, color='green', linestyle='--', label=f'Threshold: {self.md_threshold:.2f}')
-            ax1.set_xlim(0, self.md_threshold * 3) # Zoom to see the normal distribution
-            ax1.set_title('MD Distribution (Zoomed to Threshold Area)', fontweight='bold')
-            ax1.set_ylabel('Count')
-            ax1.legend()
-
-            # PANEL 2: Mahalanobis Oval (Zoomed)
-            if len(self.features) >= 2:
-                feat1, feat2 = self.features[0], self.features[1]
-                sns.scatterplot(data=result_df, x=feat1, y=feat2, hue='is_abnormal', 
-                                palette={False: 'blue', True: 'red'}, ax=ax2, alpha=0.5, s=30)
-                
-                cov = self.normal_data[[feat1, feat2]].cov().values
-                pos = self.median_3sigma[[feat1, feat2]].values
-                vals, vecs = np.linalg.eigh(cov)
-                order = vals.argsort()[::-1]
-                vals, vecs = vals[order], vecs[:, order]
-                theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
-                width, height = 2 * self.md_threshold * np.sqrt(np.maximum(vals, 0))
-                
-                ellipse = patches.Ellipse(xy=pos, width=width, height=height, angle=theta,
-                                          edgecolor='green', fc='none', lw=2, linestyle='--',
-                                          label=f'99% MD Oval')
-                ax2.add_patch(ellipse)
-                
-                # Auto-Zoom logic to ensure oval is visible regardless of outlier distance
-                padding = 1.5
-                ax2.set_xlim(pos[0] - width * padding, pos[0] + width * padding)
-                ax2.set_ylim(pos[1] - height * padding, pos[1] + height * padding)
-                
-                ax2.set_title(f'Mahalanobis Oval (Zoomed on Normal Space)', fontweight='bold')
-                ax2.set_xlabel(rf'{feat1} ($\Omega$)')
-                ax2.set_ylabel(rf'{feat2} ($\Omega$)')
-                ax2.legend()
-            
-            plt.tight_layout()
-            if save_filename:
-                plt.savefig(save_filename, dpi=300)
-                print(f"Distribution plot saved to: {save_filename}")
-
-            def plot_md_distribution_and_oval(self, result_df, save_filename=None):
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-                sns.histplot(data=result_df, x='Mahalanobis_Distance', hue='is_abnormal', bins=100, ax=ax1)
-                ax1.axvline(self.md_threshold, color='green', linestyle='--')
-                if len(self.features) >= 2:
-                    f1, f2 = self.features[0], self.features[1]
-                    sns.scatterplot(data=result_df, x=f1, y=f2, hue='is_abnormal', ax=ax2)
-                plt.tight_layout()
-                if save_filename: plt.savefig(save_filename)
-
+        if save_filename: plt.savefig(save_filename, dpi=300)
 # FOR Q-Q PLOT
 def plot_chi2_qq_plot(mts_analyzer, result_df, save_filename):
     
@@ -1018,28 +995,24 @@ def main():
 
     electrical_features = ['IR2', 'IR3', 'IR4']
     ir_thresholds = {'IR2': args.ir2_threshold, 'IR3': args.ir3_threshold, 'IR4': args.ir4_threshold}
-# 1. Load data
+    
+    # 1. Load data
     raw_df = pd.read_csv(input_file)
     
-    # 2. IMMEDIATELY add the index and clean headers
-# 2. AGGRESSIVE CLEANING: Remove BOM and all non-standard characters
+    # 2. NUCLEAR CLEANING: Remove BOM, LaTeX, and special characters
     raw_df['original_row_number'] = raw_df.index + 1
     
-    import re
-    def sanitize_column_name(name):
-        # Convert to string and remove the Byte Order Mark (BOM)
-        name = str(name).replace('\ufeff', '')
-        # Remove any LaTeX-style dollar signs
-        name = name.replace('$', '')
-        # Replace the Omega symbol or LaTeX Omega with 'Ohms'
-        name = name.replace('\\Omega', 'Ohms').replace('Ω', 'Ohms')
-        # Remove any non-ascii characters entirely
-        name = "".join(i for i in name if ord(i) < 128)
-        return name.strip()
+    def total_clean(text):
+        # Remove BOM and non-ascii characters
+        text = str(text).replace('\ufeff', '')
+        text = "".join(i for i in text if ord(i) < 128)
+        # Remove LaTeX symbols and backslashes
+        text = text.replace('$', '').replace('\\', '').replace('Omega', 'Ohms').replace('ohm', 'Ohms')
+        return text.strip()
 
-    raw_df.columns = [sanitize_column_name(c) for c in raw_df.columns]
+    raw_df.columns = [total_clean(c) for c in raw_df.columns]
 
-    # 3. DEFINE THE MAPPING
+    # 3. DEFINE THE MAPPING (Uses cleaned names)
     mapping = {}
     for col in raw_df.columns:
         col_up = col.upper()
@@ -1047,22 +1020,20 @@ def main():
         if 'IR3' in col_up and 'STATUS' not in col_up: mapping['IR3'] = col
         if 'IR4' in col_up and 'STATUS' not in col_up: mapping['IR4'] = col
 
-    # 4. Check if we found the columns
+    # 4. Check if found
     if not all(k in mapping for k in ['IR2', 'IR3', 'IR4']):
         print(f"❌ Error: Could not find numeric IR2/3/4 columns.")
-        print(f"Columns found: {list(raw_df.columns)}")
         sys.exit(1)
 
-    # 5. Define features and thresholds using mapped names
+    # 5. Features and Thresholds
     electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
-    
     ir_thresholds = {
         mapping['IR2']: float(args.ir2_threshold),
         mapping['IR3']: float(args.ir3_threshold),
         mapping['IR4']: float(args.ir4_threshold)
     }
 
-    # 6. Clean numeric data
+    # 6. Numeric Cleaning
     for col in electrical_features:
         raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
 
@@ -1070,35 +1041,33 @@ def main():
     filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(
         raw_df, electrical_features, ir_thresholds
     )
+
     # 8. Run MTS Analysis
     mts_analyzer = MTS(filtered_df, features=electrical_features, status_col='Actual_Status', 
                        normal_status='OK', ir_thresholds=ir_thresholds)
     result_df = mts_analyzer.detect_abnormal(md_quantile=args.md_quantile)
     error_summary = mts_analyzer.calculate_type1_type2_errors(result_df)
     
-    # 9. FINAL EXPORT & METRICS
-    # Ensure row number exists in the result set (Safety check)
-    if 'original_row_number' not in result_df.columns:
-        result_df['original_row_number'] = result_df.index + 1
-
+    # 9. EXPORT & METRICS
     md_output_file = os.path.join(output_folder, f'MD_{base_name}.csv')
-    
-    # Perform the export ONCE
     try:
         md_export_df = result_df[['original_row_number', 'Mahalanobis_Distance']].copy()
         md_export_df.rename(columns={'original_row_number': 'data no', 'Mahalanobis_Distance': 'MD'}, inplace=True)
         md_export_df.to_csv(md_output_file, index=False)
-        print(f"✅ Success: Full Mahalanobis Distances exported to: {md_output_file}")
+        print(f"✅ Export Success: {md_output_file}")
     except Exception as e:
         print(f"⚠️ Export failed: {e}")
 
-    # Build the metrics table for Streamlit/Report
     metrics_data = [
         {'Metric': 'N_actual normal', 'Value': error_summary['N_Actual_Normal']},
         {'Metric': 'N_actual abnormal', 'Value': error_summary['N_Actual_Abnormal']},
         {'Metric': 'Type I Error (FP)', 'Value': f"{error_summary['Type_I_Error_Rate']:.2%}"},
         {'Metric': 'Type II Error (FN)', 'Value': f"{error_summary.get('Type_II_Error_Rate', 0):.2%}"}
     ]
+
+    # 10. PLOTTING
+    output_plot_file = os.path.join(output_folder, f'Plot_{base_name}.png')
+    mts_analyzer.plot_results(result_df, secondary_threshold_percentile=args.plot_t2, save_filename=output_plot_file)
 
     # HOTELLING'S T2 for comparing with benchmark~
     t2_results = None 
