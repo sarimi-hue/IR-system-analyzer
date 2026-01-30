@@ -1019,27 +1019,15 @@ def main():
     electrical_features = ['IR2', 'IR3', 'IR4']
     ir_thresholds = {'IR2': args.ir2_threshold, 'IR3': args.ir3_threshold, 'IR4': args.ir4_threshold}
 
-# 1. Load data and clean column headers
+# 1. Load the data
     raw_df = pd.read_csv(input_file)
-    raw_df.columns = [str(c).strip() for c in raw_df.columns] # Remove hidden spaces
+    
+    # 2. IMMEDIATELY add the original row number (This is what's missing!)
+    # We use +1 so it matches Excel row numbers (1-based)
+    raw_df['original_row_number'] = raw_df.index + 1
 
-    # 2. SMART COLUMN MAPPING
-    # This finds the actual names used in your CSV (e.g., 'IR2' vs 'IR2_Val')
-    mapping = {}
-    for col in raw_df.columns:
-        col_up = col.upper()
-        if 'IR2' in col_up and 'STATUS' not in col_up: mapping['IR2'] = col
-        if 'IR3' in col_up and 'STATUS' not in col_up: mapping['IR3'] = col
-        if 'IR4' in col_up and 'STATUS' not in col_up: mapping['IR4'] = col
-
-    # Check if we successfully found the columns
-    if not all(key in mapping for key in ['IR2', 'IR3', 'IR4']):
-        print(f"❌ Error: Could not find columns for IR2, IR3, or IR4.")
-        print(f"Columns found in file: {list(raw_df.columns)}")
-        sys.exit(1)
-
-    # 3. Use the ACTUAL column names found in the file
-    electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
+    # 3. Clean column headers (Remove hidden spaces)
+    raw_df.columns = [str(c).strip() for c in raw_df.columns]
 
     # 4. Map thresholds to the actual column names (Fixes the KeyError at line 869)
     ir_thresholds = {
@@ -1050,7 +1038,7 @@ def main():
 
     # 5. Clean numeric data
     for col in electrical_features:
-        raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
+            raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
 
     # Now your original line 1057 will work:
     filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(
