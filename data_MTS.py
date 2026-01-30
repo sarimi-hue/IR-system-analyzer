@@ -2,81 +2,60 @@ import pandas as pd
 import sys
 import os
 
-def process_machine_data():
+def process_mts_data():
     if len(sys.argv) < 2:
-        print("Usage: python NG_table_fix.py <your_file.csv>")
+        print("Usage: python data_MTS.py <your_file.csv>")
         return
 
     input_file = sys.argv[1]
+    base_name = os.path.basename(input_file)
     
     try:
         # 1. Load the data
         df = pd.read_csv(input_file, sep=None, engine='python')
-
-        # --- UPDATED: Delete only truly empty rows at the end ---
-        # This removes rows where EVERY column is empty/NaN
         df = df.dropna(how='all').reset_index(drop=True) 
-        
-        # Alternatively, if "empty" means they contain only whitespace or empty strings:
-        # df = df[df.astype(str).replace(r'^\s*$', None, regex=True).notna().any(axis=1)]
 
-        # 2. Identify and Rename Columns
+        # 2. Add 'Serial No' if it doesn't exist (needed for the final join)
+        if 'Serial No' not in df.columns:
+            df.insert(0, 'Serial No', range(1, len(df) + 1))
+        
+        df['Serial No'] = df['Serial No'].astype(str).str.strip()
+
+        # 3. Identify and Rename Columns for the Math script
         new_cols = list(df.columns)
         for i in range(len(new_cols)):
             if "Status" in str(new_cols[i]):
+                # Looks at the column to the left to name the status (e.g., Status_IR2)
                 prev_col = str(new_cols[i-1]).strip() if i > 0 else "Unknown"
                 new_cols[i] = f"Status_{prev_col}"
         
         df.columns = new_cols
 
-        # 3. Update the values in Status columns
-        for col in df.columns:
-                    if col.startswith("Status_"):
-                        # This line now sets every value in these columns to "Normal"
-                        df[col] = "Normal"
-        # 4. Calculation Logic
-        def get_mask(search_term):
-            for c in df.columns:
-                if search_term.upper() in c.upper() and "STATUS" in c.upper():
-                    return df[c] == 'NG'
-            return pd.Series([False] * len(df))
+        # --- IMPORTANT: Keep actual data! ---
+        # We don't force them to "Normal" here because IR_test12 needs to see the real values.
 
-        mask2 = get_mask("IR2")
-        mask3 = get_mask("IR3")
-        mask4 = get_mask("IR4")
+        # 4. Save the "Normalised" file (Main input for IR_test12.py)
+        normalised_name = f"Normalised_{base_name}"
+        df.to_csv(normalised_name, index=False)
+        print(f"✅ Normalised file saved: {normalised_name}")
 
-        # Calculations
-        a1, a2, a3 = mask2.sum(), mask3.sum(), mask4.sum()
-        b1 = (mask2 & mask3).sum()
-        b2 = (mask2 & mask4).sum()
-        b3 = (mask3 & mask4).sum()
-        c = (mask2 & mask3 & mask4).sum()
-        total_ng_mask = (mask2 | mask3 | mask4)
-        total_ng_count = total_ng_mask.sum()
+        # 5. Create the "MTS_NG" list for the final Venn diagram comparison
+        # We define NG as anything that isn't 'OK' or 'NORMAL' in the status columns
+        status_cols = [c for c in df.columns if c.startswith("Status_")]
+        
+        # Filter for rows where any status column contains an NG value
+        # Adjust the ['OK', 'NORMAL'] list if your MTS machine uses different 'Pass' text
+        is_ng = df[status_cols].apply(lambda x: ~x.astype(str).str.upper().isin(['OK', 'NORMAL', 'PASS'])).any(axis=1)
+        df_ng = df[is_ng].reset_index(drop=True)
 
-        # Print results
-        print("="*35)
-        print("📊 TERMINAL NG SUMMARY REPORT")
-        print("-" * 35)
-        print(f"A1 (IR2 NG): {a1}")
-        print(f"A2 (IR3 NG): {a2}")
-        print(f"A3 (IR4 NG): {a3}")
-        print("-" * 35)
-        print(f"TOTAL UNIQUE NG: {total_ng_count}")
-        print("="*35)
-
-        # 5. Save output
-        output_name = f"Normalised_{os.path.basename(input_file)}"
-        df.to_csv(output_name, index=False)
-        print(f"✅ Processed file saved as: {output_name}")
-
-    import sys
-# ... at the very end of the script ...
-input_filename = sys.argv[1]
-df.to_csv(f"MTS_NG_Normalised_{input_filename}", index=False)
+        # 6. Save the NG-only file for NG_compare.py
+        mts_ng_name = f"MTS_NG_Normalised_{base_name}"
+        df_ng.to_csv(mts_ng_name, index=False)
+        print(f"✅ MTS NG list saved: {mts_ng_name}")
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error in data_MTS.py: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    process_machine_data()
+    process_mts_data()
