@@ -420,7 +420,8 @@ class MTS:
     
     # 1. Load data
     def load_data(self, file_path):
-    raw_df = pd.read_csv(file_path)
+        raw_df = pd.read_csv(file_path)
+        return raw_df
     
     # 2. NUCLEAR CLEANING: Remove BOM, LaTeX, and special characters
     raw_df['original_row_number'] = raw_df.index + 1
