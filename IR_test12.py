@@ -426,7 +426,7 @@ class MTS:
                 # Use the original feature name for the axis title if it's a log feature
                 original_feature_name = feature.replace('ln(', '').replace(')', '')
                 # X-axis label includes scale information
-                feature_label = f'{original_feature_name} ($\\Omega$)' if scale_label == 'Linear Scale' else f'$\\ln$({original_feature_name})'
+                feature_label = rf'{original_feature_name} ($\\Omega$)' if scale_label == 'Linear Scale' else f'$\\ln$({original_feature_name})'
                 
                 # Check for data existence
                 if data_df_ok.empty or median_ok_stats is None or std_ok_stats is None:
@@ -685,8 +685,8 @@ class MTS:
                 ax2.set_ylim(pos[1] - height * padding, pos[1] + height * padding)
                 
                 ax2.set_title(f'Mahalanobis Oval (Zoomed on Normal Space)', fontweight='bold')
-                ax2.set_xlabel(f'{feat1} ($\Omega$)')
-                ax2.set_ylabel(f'{feat2} ($\Omega$)')
+                ax2.set_xlabel(rf'{feat1} ($\Omega$)')
+                ax2.set_ylabel(rf'{feat2} ($\Omega$)')
                 ax2.legend()
             
             plt.tight_layout()
