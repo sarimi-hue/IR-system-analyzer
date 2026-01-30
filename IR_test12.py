@@ -1019,31 +1019,40 @@ def main():
     electrical_features = ['IR2', 'IR3', 'IR4']
     ir_thresholds = {'IR2': args.ir2_threshold, 'IR3': args.ir3_threshold, 'IR4': args.ir4_threshold}
 
-# 1. Load data and clean column headers
-    raw_df = pd.read_csv(input_file)
-    raw_df.columns = raw_df.columns.str.strip()
-
-    # 2. Check if the columns exist (CRITICAL)
-    # If data_MTS.py named them differently, the script will tell us here
-    electrical_features = ['IR2', 'IR3', 'IR4']
-    missing_cols = [c for c in electrical_features if c not in raw_df.columns]
-    if missing_cols:
-        print(f"❌ ERROR: Missing columns: {missing_cols}")
-        print(f"DEBUG: Found these columns instead: {list(raw_df.columns)}")
+# 1. Load the data
+    try:
+        raw_df = pd.read_csv(input_file)
+    except Exception as e:
+        print(f"Error reading CSV: {e}")
         sys.exit(1)
 
-    # 3. Force numeric conversion and handle non-numbers
-    for col in electrical_features:
-        # This converts "Error", "Low", or empty spaces to 0 so math doesn't break
+    # 2. Clean headers (removes hidden spaces or newlines)
+    raw_df.columns = [str(c).strip() for c in raw_df.columns]
+
+    # 3. Dynamic Column Mapping 
+    # This prevents the "KeyError" if columns are named slightly differently
+    mapping = {}
+    for col in raw_df.columns:
+        if 'IR2' in col.upper() and 'STATUS' not in col.upper(): mapping['IR2'] = col
+        if 'IR3' in col.upper() and 'STATUS' not in col.upper(): mapping['IR3'] = col
+        if 'IR4' in col.upper() and 'STATUS' not in col.upper(): mapping['IR4'] = col
+
+    # Update our feature list based on what we actually found
+    actual_features = [mapping.get('IR2'), mapping.get('IR3'), mapping.get('IR4')]
+    
+    if None in actual_features:
+        print(f"❌ Error: Could not find IR2, IR3, or IR4 columns.")
+        print(f"Found columns: {list(raw_df.columns)}")
+        sys.exit(1)
+
+    # 4. Clean Numeric Data
+    for col in actual_features:
         raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
 
-    # 4. Add index and drop completely empty rows for MD calculation
-    raw_df['original_row_number'] = raw_df.index + 1
-    raw_df = raw_df.dropna(subset=electrical_features).reset_index(drop=True)
-    
-    # 5. Drop completely empty rows (safety for Mahalanobis math)
-    raw_df = raw_df.dropna(subset=electrical_features).reset_index(drop=True)
-
+    # 5. Math Safety
+    # Mahalanobis requires a non-singular covariance matrix. 
+    # If all values are 0, it crashes. We drop rows with all 0s.
+    raw_df = raw_df[(raw_df[actual_features] != 0).any(axis=1)].reset_index(drop=True)
     # Stage 1: Filter
     filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(raw_df, electrical_features, ir_thresholds)
     filtered_df.to_csv(output_filtered_file, index=False)
