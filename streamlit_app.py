@@ -5,7 +5,7 @@ import sys
 import pandas as pd
 import glob
 
-# Helper to clean up headers so serial numbers match perfectly
+# Helper to clean up headers so serial numbers match perfectly for merging
 def prepare_files_for_comparison(mts_file, machine_file):
     try:
         for file in [mts_file, machine_file]:
@@ -24,6 +24,7 @@ st.write("Upload your raw data to run the automated sorting analysis.")
 
 # 1. Sidebar Settings
 st.sidebar.header("Analysis Settings")
+st.sidebar.write("Adjust pass/fail thresholds:")
 ir2_val = st.sidebar.text_input("IR2 Limit", "50")
 ir3_val = st.sidebar.text_input("IR3 Limit", "50")
 ir4_val = st.sidebar.text_input("IR4 Limit", "50")
@@ -52,42 +53,58 @@ if uploaded_file is not None:
             mts_ng_out = f"MTS_NG_Normalised_{input_filename}"
 
             with st.status("Processing...", expanded=True) as status:
+                
+                # --- TASK 1 & 2: DATA PREP ---
                 st.write("🔍 Identifying machine-related failures...")
                 subprocess.run([sys.executable, "data_machine.py", input_filename], check=True)
                 
                 st.write("⚖️ Normalizing electrical measurements...")
                 subprocess.run([sys.executable, "data_MTS.py", input_filename], check=True)
                 
+                # --- TASK 3: STATISTICAL ANALYSIS (IR_test12.py) ---
                 if os.path.exists(normalised_out):
-                    st.write("📈 Calculating Statistics (MD)...")
-                    subprocess.run([
+                    st.write("📈 Calculating Statistics (Mahalanobis Distance)...")
+                    # We capture the output here to catch hidden errors
+                    result_ir = subprocess.run([
                         sys.executable, "IR_test12.py", 
                         "--file", normalised_out, 
                         "--ir2_threshold", ir2_val, 
                         "--ir3_threshold", ir3_val, 
                         "--ir4_threshold", ir4_val
-                    ], check=True)
+                    ], capture_output=True, text=True)
+                    
+                    if result_ir.returncode != 0:
+                        st.error("Error in IR_test12.py (Statistical Analysis)")
+                        st.code(result_ir.stderr)
+                        st.stop()
                 else:
-                    st.error(f"Error: {normalised_out} was not found after processing.")
+                    st.error(f"Error: {normalised_out} was not found.")
                     st.stop()
 
-                # --- THE FILE DETECTIVE (DEBUGGING) ---
-                st.write("🔎 Debugging: Listing all files generated on server...")
+                # --- DEBUGGING STEP ---
+                st.write("🔎 Debugging: Verifying intermediate files...")
                 current_files = os.listdir(".")
-                st.write(f"Files found: {current_files}")
-                # --------------------------------------
-
+                
+                # --- TASK 4: STANDARDIZE ---
                 st.write("🧹 Standardizing headers for comparison...")
                 if machine_out in current_files and mts_ng_out in current_files:
                     prepare_files_for_comparison(mts_ng_out, machine_out)
                 else:
                     st.error("Comparison failed: Missing intermediate files.")
                     st.write(f"Looking for: **{machine_out}** and **{mts_ng_out}**")
-                    st.write("But they were not in the file list above.")
                     st.stop()
 
+                # --- TASK 5: VENN DIAGRAMS ---
                 st.write("🎨 Generating Venn diagrams...")
-                subprocess.run([sys.executable, "NG_compare.py", mts_ng_out, machine_out, output_folder], check=True)
+                result_comp = subprocess.run([
+                    sys.executable, "NG_compare.py", 
+                    mts_ng_out, machine_out, output_folder
+                ], capture_output=True, text=True)
+                
+                if result_comp.returncode != 0:
+                    st.error("Error in NG_compare.py (Comparison Step)")
+                    st.code(result_comp.stderr)
+                    st.stop()
                 
                 status.update(label="Analysis Complete!", state="complete", expanded=False)
 
@@ -104,7 +121,7 @@ if uploaded_file is not None:
             st.info(f"Results are stored in: {output_folder}")
             
         except subprocess.CalledProcessError as e:
-            st.error("A background script failed.")
+            st.error("A background script failed completely.")
             st.code(f"Technical Detail: {e}")
         except Exception as e:
             st.error(f"Unexpected error: {e}")
