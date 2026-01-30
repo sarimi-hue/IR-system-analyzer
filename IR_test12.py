@@ -1018,34 +1018,39 @@ def main():
 
     electrical_features = ['IR2', 'IR3', 'IR4']
     ir_thresholds = {'IR2': args.ir2_threshold, 'IR3': args.ir3_threshold, 'IR4': args.ir4_threshold}
-
-# 1. Load data
+# 1. Load data and clean headers
     raw_df = pd.read_csv(input_file)
-    raw_df.columns = [str(c).strip() for c in raw_df.columns] # Clean headers
+    raw_df.columns = [str(c).strip() for c in raw_df.columns] # Remove hidden spaces
 
-    # 2. DEFINE THE MAPPING (Add this block if it's missing!)
+    # 2. SMART COLUMN MAPPING (This is the critical part)
+    # This finds the actual names used in your CSV
     mapping = {}
     for col in raw_df.columns:
         col_up = col.upper()
+        # Look for the numeric value column, ignoring 'status' or 'flag' columns
         if 'IR2' in col_up and 'STATUS' not in col_up: mapping['IR2'] = col
         if 'IR3' in col_up and 'STATUS' not in col_up: mapping['IR3'] = col
         if 'IR4' in col_up and 'STATUS' not in col_up: mapping['IR4'] = col
 
-    # 3. Check if mapping was successful
+    # 3. Check if we found the columns
     if not all(k in mapping for k in ['IR2', 'IR3', 'IR4']):
-        print(f"Error: Could not map IR columns. Found: {list(raw_df.columns)}")
+        print(f"❌ Error: Could not find columns for IR2, IR3, or IR4.")
+        print(f"Columns found in file: {list(raw_df.columns)}")
         sys.exit(1)
 
-    # 4. NOW you can use mapping to define thresholds (Line 1034)
+    # 4. Use the ACTUAL column names found
+    electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
+
+    # 5. Define thresholds using the mapped names (Fixes the KeyError)
     ir_thresholds = {
         mapping['IR2']: float(args.ir2_threshold),
         mapping['IR3']: float(args.ir3_threshold),
         mapping['IR4']: float(args.ir4_threshold)
     }
 
-    # 5. Clean numeric data
+    # 6. Clean numeric data using the mapped names
     for col in electrical_features:
-            raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
+        raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
 
     # Now your original line 1057 will work:
     filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(
