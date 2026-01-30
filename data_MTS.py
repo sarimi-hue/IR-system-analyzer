@@ -70,6 +70,11 @@ def process_machine_data():
         df.to_csv(output_name, index=False)
         print(f"✅ Processed file saved as: {output_name}")
 
+    import sys
+# ... at the very end of the script ...
+input_filename = sys.argv[1]
+df.to_csv(f"MTS_NG_Normalised_{input_filename}", index=False)
+
     except Exception as e:
         print(f"❌ Error: {e}")
 
