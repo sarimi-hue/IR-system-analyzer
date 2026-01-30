@@ -1019,17 +1019,24 @@ def main():
     electrical_features = ['IR2', 'IR3', 'IR4']
     ir_thresholds = {'IR2': args.ir2_threshold, 'IR3': args.ir3_threshold, 'IR4': args.ir4_threshold}
 
-# 1. Load the data
+# 1. Load data
     raw_df = pd.read_csv(input_file)
-    
-    # 2. IMMEDIATELY add the original row number (This is what's missing!)
-    # We use +1 so it matches Excel row numbers (1-based)
-    raw_df['original_row_number'] = raw_df.index + 1
+    raw_df.columns = [str(c).strip() for c in raw_df.columns] # Clean headers
 
-    # 3. Clean column headers (Remove hidden spaces)
-    raw_df.columns = [str(c).strip() for c in raw_df.columns]
+    # 2. DEFINE THE MAPPING (Add this block if it's missing!)
+    mapping = {}
+    for col in raw_df.columns:
+        col_up = col.upper()
+        if 'IR2' in col_up and 'STATUS' not in col_up: mapping['IR2'] = col
+        if 'IR3' in col_up and 'STATUS' not in col_up: mapping['IR3'] = col
+        if 'IR4' in col_up and 'STATUS' not in col_up: mapping['IR4'] = col
 
-    # 4. Map thresholds to the actual column names (Fixes the KeyError at line 869)
+    # 3. Check if mapping was successful
+    if not all(k in mapping for k in ['IR2', 'IR3', 'IR4']):
+        print(f"Error: Could not map IR columns. Found: {list(raw_df.columns)}")
+        sys.exit(1)
+
+    # 4. NOW you can use mapping to define thresholds (Line 1034)
     ir_thresholds = {
         mapping['IR2']: float(args.ir2_threshold),
         mapping['IR3']: float(args.ir3_threshold),
