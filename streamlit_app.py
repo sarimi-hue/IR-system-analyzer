@@ -5,50 +5,65 @@ import sys
 import pandas as pd
 import glob
 
-# Set page title
+# Helper to clean up the data headers before comparing
+def prepare_files_for_comparison(mts_file, machine_file):
+    try:
+        for file in [mts_file, machine_file]:
+            if os.path.exists(file):
+                df = pd.read_csv(file)
+                # We make sure 'Serial No' is a clean string so the scripts can match them
+                if 'Serial No' in df.columns:
+                    df['Serial No'] = df['Serial No'].astype(str).str.strip()
+                    df.to_csv(file, index=False)
+    except Exception as e:
+        st.warning(f"Note on data cleaning: {e}")
+
+# Page Setup
 st.set_page_config(page_title="IR System Analyzer", layout="wide")
 st.title("🔬 IR System Statistical Analyzer")
+st.write("Upload your data below to begin the automated sorting analysis.")
 
-# 1. Sidebar for Parameters
-st.sidebar.header("Settings")
-ir2_val = st.sidebar.text_input("IR2 Threshold", "50")
-ir3_val = st.sidebar.text_input("IR3 Threshold", "50")
-ir4_val = st.sidebar.text_input("IR4 Threshold", "50")
+# 1. Sidebar for User Settings
+st.sidebar.header("Analysis Settings")
+st.sidebar.write("Set your pass/fail thresholds here:")
+ir2_val = st.sidebar.text_input("IR2 Limit", "50")
+ir3_val = st.sidebar.text_input("IR3 Limit", "50")
+ir4_val = st.sidebar.text_input("IR4 Limit", "50")
 
 # 2. File Uploader
-uploaded_file = st.file_uploader("Upload Raw CSV Data File", type=["csv"])
+uploaded_file = st.file_uploader("Drop your raw CSV file here", type=["csv"])
 
 if uploaded_file is not None:
-    # Save the uploaded file locally so scripts can find it
     input_filename = uploaded_file.name
+    # Temporarily save the file so our sub-scripts can read it
     with open(input_filename, "wb") as f:
         f.write(uploaded_file.getbuffer())
+    st.success(f"Successfully loaded: {input_filename}")
 
-    st.success(f"Loaded: {input_filename}")
-
-if st.button("🚀 Run Full Analysis"):
+    # 3. Action Button
+    if st.button("🚀 Start Analysis"):
         try:
-            # 1. Setup Paths
-            base_no_ext = os.path.splitext(input_filename)[0]
-            output_folder = f"sorting_analysis_result_{base_no_ext}" # Removed spaces for safety
+            # Setting up the workspace
+            base_name = os.path.splitext(input_filename)[0]
+            output_folder = f"results_{base_name}"
             
-            # CRITICAL: Create the folder FIRST so the scripts have a place to save
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder)
 
-            # 2. Define filenames (Ensuring they match what your scripts produce)
+            # Defining our intermediate files
             machine_out = f"Machine_NG_ONLY_{input_filename}"
             normalised_out = f"Normalised_{input_filename}"
             mts_ng_out = f"MTS_NG_Normalised_{input_filename}"
 
-            with st.status("Processing Data...", expanded=True) as status:
-                st.write("Extracting Machine Failures...")
+            # Running the engine
+            with st.status("Working on your data...", expanded=True) as status:
+                st.write("🔍 Identifying machine-related failures...")
                 subprocess.run([sys.executable, "data_machine.py", input_filename], check=True)
                 
-                st.write("Normalizing Electrical Data...")
+                st.write("⚖️ Normalizing electrical measurements...")
                 subprocess.run([sys.executable, "data_MTS.py", input_filename], check=True)
                 
-                st.write("Running Statistical Analysis...")
+                st.write("📈 Calculating Mahalanobis Distance and Statistics...")
                 subprocess.run([
                     sys.executable, "IR_test12.py", 
                     "--file", normalised_out, 
@@ -57,37 +72,30 @@ if st.button("🚀 Run Full Analysis"):
                     "--ir4_threshold", ir4_val
                 ], check=True)
 
-                # IMPORTANT: Run the header fix logic right here in streamlit_app.py 
-                # to ensure files are ready for NG_compare
-                st.write("Standardizing Headers...")
+                st.write("Cleaning up headers for final comparison...")
                 prepare_files_for_comparison(mts_ng_out, machine_out)
 
-                st.write("Generating Final Comparison...")
-                # Pass the output_folder explicitly
+                st.write("Generating Venn diagrams...")
                 subprocess.run([sys.executable, "NG_compare.py", mts_ng_out, machine_out, output_folder], check=True)
                 
-                status.update(label="Analysis Complete!", state="complete", expanded=False)
+                status.update(label="All finished!", state="complete", expanded=False)
 
-            # 3. Display Download Button for the result
-            st.success("Success! You can now view the results below.")
+            # 4. Show the Results
+            st.header("Final Comparison Results")
+            
+            # Look for any images generated in the results folder
+            images = glob.glob(f"{output_folder}/*.png")
+            if images:
+                cols = st.columns(len(images))
+                for i, img_path in enumerate(images):
+                    cols[i].image(img_path, caption=os.path.basename(img_path))
+            else:
+                st.warning("No charts were generated. This usually means no matching failures were found between the machine and the electrical test.")
+
+            st.info(f"You can find all processed files in the folder: {output_folder}")
             
         except subprocess.CalledProcessError as e:
-            st.error(f"Script Error: {e}")
-            # This will show you the ACTUAL error from inside the sub-script
-            st.code(e.stderr if e.stderr else "Check logs for detail")
-
-            # 3. Display Results
-            st.header("📊 Analysis Results")
-            
-            # Find the Venn Diagram image in the output folder
-            venn_images = glob.glob(f"{output_folder}/*.png")
-            if venn_images:
-                cols = st.columns(len(venn_images))
-                for idx, img_path in enumerate(venn_images):
-                    cols[idx].image(img_path, caption=os.path.basename(img_path))
-
-            # Provide Download for the Result Folder
-            st.info(f"All files saved in: {output_folder}")
-            
+            st.error("One of the background scripts ran into an issue.")
+            st.code(f"Technical detail: {e}")
         except Exception as e:
-            st.error(f"Error during processing: {e}")
+            st.error(f"An unexpected error occurred: {e}")
