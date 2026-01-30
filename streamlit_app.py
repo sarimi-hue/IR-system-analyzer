@@ -26,13 +26,21 @@ if uploaded_file is not None:
 
     st.success(f"Loaded: {input_filename}")
 
-    if st.button("🚀 Run Full Analysis"):
+if st.button("🚀 Run Full Analysis"):
         try:
-            # We use the same logic as your main.py
+            # 1. Setup Paths
             base_no_ext = os.path.splitext(input_filename)[0]
-            output_folder = f"sorting analysis result_{base_no_ext}"
+            output_folder = f"sorting_analysis_result_{base_no_ext}" # Removed spaces for safety
             
-            # Step 1: Machine Logic
+            # CRITICAL: Create the folder FIRST so the scripts have a place to save
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder)
+
+            # 2. Define filenames (Ensuring they match what your scripts produce)
+            machine_out = f"Machine_NG_ONLY_{input_filename}"
+            normalised_out = f"Normalised_{input_filename}"
+            mts_ng_out = f"MTS_NG_Normalised_{input_filename}"
+
             with st.status("Processing Data...", expanded=True) as status:
                 st.write("Extracting Machine Failures...")
                 subprocess.run([sys.executable, "data_machine.py", input_filename], check=True)
@@ -40,8 +48,7 @@ if uploaded_file is not None:
                 st.write("Normalizing Electrical Data...")
                 subprocess.run([sys.executable, "data_MTS.py", input_filename], check=True)
                 
-                st.write("Running Statistical Analysis (MD)...")
-                normalised_out = f"Normalised_{input_filename}"
+                st.write("Running Statistical Analysis...")
                 subprocess.run([
                     sys.executable, "IR_test12.py", 
                     "--file", normalised_out, 
@@ -50,15 +57,24 @@ if uploaded_file is not None:
                     "--ir4_threshold", ir4_val
                 ], check=True)
 
-                st.write("Generating Venn Diagrams...")
-                mts_ng_out = f"MTS_NG_Normalised_{input_filename}"
-                machine_out = f"Machine_NG_ONLY_{input_filename}"
-                
-                # Note: We call your harmonization logic here if needed
-                # (You can paste your prepare_files_for_comparison function here)
-                
+                # IMPORTANT: Run the header fix logic right here in streamlit_app.py 
+                # to ensure files are ready for NG_compare
+                st.write("Standardizing Headers...")
+                prepare_files_for_comparison(mts_ng_out, machine_out)
+
+                st.write("Generating Final Comparison...")
+                # Pass the output_folder explicitly
                 subprocess.run([sys.executable, "NG_compare.py", mts_ng_out, machine_out, output_folder], check=True)
+                
                 status.update(label="Analysis Complete!", state="complete", expanded=False)
+
+            # 3. Display Download Button for the result
+            st.success("Success! You can now view the results below.")
+            
+        except subprocess.CalledProcessError as e:
+            st.error(f"Script Error: {e}")
+            # This will show you the ACTUAL error from inside the sub-script
+            st.code(e.stderr if e.stderr else "Check logs for detail")
 
             # 3. Display Results
             st.header("📊 Analysis Results")
