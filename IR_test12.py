@@ -1019,43 +1019,43 @@ def main():
     electrical_features = ['IR2', 'IR3', 'IR4']
     ir_thresholds = {'IR2': args.ir2_threshold, 'IR3': args.ir3_threshold, 'IR4': args.ir4_threshold}
 
-# 1. Load the data
-    try:
-        raw_df = pd.read_csv(input_file)
-    except Exception as e:
-        print(f"Error reading CSV: {e}")
-        sys.exit(1)
+# 1. Load data and clean column headers
+    raw_df = pd.read_csv(input_file)
+    raw_df.columns = [str(c).strip() for c in raw_df.columns] # Remove hidden spaces
 
-    # 2. Clean headers (removes hidden spaces or newlines)
-    raw_df.columns = [str(c).strip() for c in raw_df.columns]
-
-    # 3. Dynamic Column Mapping 
-    # This prevents the "KeyError" if columns are named slightly differently
+    # 2. SMART COLUMN MAPPING
+    # This finds the actual names used in your CSV (e.g., 'IR2' vs 'IR2_Val')
     mapping = {}
     for col in raw_df.columns:
-        if 'IR2' in col.upper() and 'STATUS' not in col.upper(): mapping['IR2'] = col
-        if 'IR3' in col.upper() and 'STATUS' not in col.upper(): mapping['IR3'] = col
-        if 'IR4' in col.upper() and 'STATUS' not in col.upper(): mapping['IR4'] = col
+        col_up = col.upper()
+        if 'IR2' in col_up and 'STATUS' not in col_up: mapping['IR2'] = col
+        if 'IR3' in col_up and 'STATUS' not in col_up: mapping['IR3'] = col
+        if 'IR4' in col_up and 'STATUS' not in col_up: mapping['IR4'] = col
 
-    # Update our feature list based on what we actually found
-    actual_features = [mapping.get('IR2'), mapping.get('IR3'), mapping.get('IR4')]
-    
-    if None in actual_features:
-        print(f"❌ Error: Could not find IR2, IR3, or IR4 columns.")
-        print(f"Found columns: {list(raw_df.columns)}")
+    # Check if we successfully found the columns
+    if not all(key in mapping for key in ['IR2', 'IR3', 'IR4']):
+        print(f"❌ Error: Could not find columns for IR2, IR3, or IR4.")
+        print(f"Columns found in file: {list(raw_df.columns)}")
         sys.exit(1)
 
-    # 4. Clean Numeric Data
-    for col in actual_features:
+    # 3. Use the ACTUAL column names found in the file
+    electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
+
+    # 4. Map thresholds to the actual column names (Fixes the KeyError at line 869)
+    ir_thresholds = {
+        mapping['IR2']: float(args.ir2_threshold),
+        mapping['IR3']: float(args.ir3_threshold),
+        mapping['IR4']: float(args.ir4_threshold)
+    }
+
+    # 5. Clean numeric data
+    for col in electrical_features:
         raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
 
-    # 5. Math Safety
-    # Mahalanobis requires a non-singular covariance matrix. 
-    # If all values are 0, it crashes. We drop rows with all 0s.
-    raw_df = raw_df[(raw_df[actual_features] != 0).any(axis=1)].reset_index(drop=True)
-    # Stage 1: Filter
-    filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(raw_df, electrical_features, ir_thresholds)
-    filtered_df.to_csv(output_filtered_file, index=False)
+    # Now your original line 1057 will work:
+    filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(
+        raw_df, electrical_features, ir_thresholds
+    )
 
     # Stage 2: MTS
     mts_analyzer = MTS(filtered_df, features=electrical_features, status_col='Actual_Status', 
