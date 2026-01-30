@@ -1021,14 +1021,14 @@ def main():
 # 1. Load data
     raw_df = pd.read_csv(input_file)
     
-    # 2. IMMEDIATELY clean headers (removes hidden spaces)
+    # 2. IMMEDIATELY add the index and clean headers
+    raw_df['original_row_number'] = raw_df.index + 1
     raw_df.columns = [str(c).strip() for c in raw_df.columns]
 
-    # 3. DEFINE THE MAPPING (This MUST come before line 1031)
+    # 3. DEFINE THE MAPPING
     mapping = {}
     for col in raw_df.columns:
         col_up = col.upper()
-        # Find numeric columns, avoiding 'Status' columns
         if 'IR2' in col_up and 'STATUS' not in col_up: mapping['IR2'] = col
         if 'IR3' in col_up and 'STATUS' not in col_up: mapping['IR3'] = col
         if 'IR4' in col_up and 'STATUS' not in col_up: mapping['IR4'] = col
@@ -1039,37 +1039,46 @@ def main():
         print(f"Columns found: {list(raw_df.columns)}")
         sys.exit(1)
 
-    # 5. NOW line 1031 will work because 'mapping' exists
+    # 5. Define features and thresholds using mapped names
     electrical_features = [mapping['IR2'], mapping['IR3'], mapping['IR4']]
+    
+    # CRITICAL: Fix the thresholds keys to match mapped names
+    ir_thresholds = {
+        mapping['IR2']: float(args.ir2_threshold),
+        mapping['IR3']: float(args.ir3_threshold),
+        mapping['IR4']: float(args.ir4_threshold)
+    }
 
-    # 6. Clean numeric data using the mapped names
+    # 6. Clean numeric data
     for col in electrical_features:
         raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce').fillna(0)
 
-    # Now your original line 1057 will work:
+    # 7. Run Filtering
     filtered_df, ir_fail_indices, chi2_fail_indices, sigma_fail_indices = unsupervised_filter_and_label(
         raw_df, electrical_features, ir_thresholds
     )
 
-    # Stage 2: MTS
+    # 8. Run MTS Analysis
     mts_analyzer = MTS(filtered_df, features=electrical_features, status_col='Actual_Status', 
                        normal_status='OK', ir_thresholds=ir_thresholds)
     result_df = mts_analyzer.detect_abnormal(md_quantile=args.md_quantile)
-    error_summary = mts_analyzer.calculate_type1_type2_errors(result_df)
-
-    # ADDED: EXPORT ALL MD VALUES
-    md_output_file = os.path.join(output_folder, f'MD_{base_name}.csv')
-    md_export_df = result_df[['original_row_number', 'Mahalanobis_Distance']].copy()
-    md_export_df.rename(columns={'original_row_number': 'data no', 'Mahalanobis_Distance': 'MD'}, inplace=True)
-    md_export_df.to_csv(md_output_file, index=False)
-    print(f"Full Mahalanobis Distances exported to: {md_output_file}")
-
+    
+    # 9. FINAL EXPORT (Cleaned version)
     if 'original_row_number' not in result_df.columns:
-        # Re-attach the row numbers based on the index
         result_df['original_row_number'] = result_df.index + 1
 
-    # This is the line that was crashing:
-    md_export_df = result_df[['original_row_number', 'Mahalanobis_Distance']].copy()
+    md_output_file = os.path.join(output_folder, f'MD_{base_name}.csv')
+
+    try:
+        # Prepare export dataframe
+        md_export_df = result_df[['original_row_number', 'Mahalanobis_Distance']].copy()
+        md_export_df.rename(columns={'original_row_number': 'data no', 'Mahalanobis_Distance': 'MD'}, inplace=True)
+        md_export_df.to_csv(md_output_file, index=False)
+        print(f"✅ Success: Full Mahalanobis Distances exported to: {md_output_file}")
+    except KeyError as e:
+        print(f"⚠️ Warning: Could not export MD values. Column missing: {e}")
+    except Exception as e:
+        print(f"⚠️ Unexpected error during export: {e}")
 
     # HOTELLING'S T2 for comparing with benchmark~
     t2_results = None 
