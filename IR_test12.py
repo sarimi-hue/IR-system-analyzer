@@ -491,7 +491,7 @@ class MTS:
     output_plot_file = os.path.join(output_folder, f'Plot_{base_name}.png')
     mts_analyzer.plot_results(result_df, secondary_threshold_percentile=args.plot_t2, save_filename=output_plot_file)
 
-def plot_distributions(feature_set, data_df_all, data_df_ok, median_ok_stats, std_ok_stats, raw_median_stats, raw_std_stats, ir_thresholds_stats, R_start, scale_label):
+    def plot_distributions(feature_set, data_df_all, data_df_ok, median_ok_stats, std_ok_stats, raw_median_stats, raw_std_stats, ir_thresholds_stats, R_start, scale_label):
         for i, feature in enumerate(feature_set):
             # 1. Clean the feature name for labeling (Safe for Matplotlib)
             clean_name = str(feature).replace('ln(', '').replace(')', '').replace('$', '').replace('\\', '').strip()
